@@ -84,7 +84,7 @@ func GetFavorites(client *mongo.Client) http.HandlerFunc {
 			},
 			{
 				{Key: "$lookup", Value: bson.M{
-					"from":         "demo_prop",
+					"from":         "properties",
 					"localField":   "propertyID",
 					"foreignField": "_id",
 					"as":           "propertyDetails",

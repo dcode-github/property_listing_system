@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -66,10 +67,114 @@ func GetAllProperties(_ *mongo.Client) http.HandlerFunc {
 			return
 		}
 
+		query := r.URL.Query()
 		filters := bson.M{}
-		for key, values := range r.URL.Query() {
-			if key != "userID" && len(values) > 0 {
-				filters[key] = strings.Join(values, ",")
+
+		operatorMap := map[string]string{
+			"eq":  "$eq",
+			"ne":  "$ne",
+			"gt":  "$gt",
+			"gte": "$gte",
+			"lt":  "$lt",
+			"lte": "$lte",
+		}
+
+		numericFields := map[string]bool{
+			"price":     true,
+			"areaSqFt":  true,
+			"bedrooms":  true,
+			"bathrooms": true,
+			"rating":    true,
+		}
+
+		dateFields := map[string]bool{
+			"availableFrom": true,
+		}
+
+		boolFields := map[string]bool{
+			"isVerified": true,
+		}
+
+		stringFields := map[string]bool{
+			"id":          true,
+			"title":       true,
+			"type":        true,
+			"state":       true,
+			"city":        true,
+			"amenities":   true,
+			"furnished":   true,
+			"listedBy":    true,
+			"tags":        true,
+			"listingType": true,
+		}
+
+		for rawKey, values := range query {
+			if rawKey == "userID" || len(values) == 0 {
+				continue
+			}
+
+			key := rawKey
+			op := "$eq"
+
+			if strings.Contains(rawKey, "[") && strings.Contains(rawKey, "]") {
+				parts := strings.SplitN(rawKey, "[", 2)
+				key = parts[0]
+				opKey := strings.TrimSuffix(parts[1], "]")
+				if mappedOp, exists := operatorMap[opKey]; exists {
+					op = mappedOp
+				}
+			}
+
+			value := values[0]
+
+			if stringFields[key] {
+				if key == "tags" || key == "amenities" {
+					regexFilters := bson.A{}
+					for _, v := range strings.Split(value, ",") {
+						regexFilters = append(regexFilters, bson.M{
+							key: bson.M{
+								"$regex":   v,
+								"$options": "i",
+							},
+						})
+					}
+					if len(regexFilters) > 0 {
+						if existingOr, exists := filters["$or"]; exists {
+							filters["$or"] = append(existingOr.(bson.A), regexFilters...)
+						} else {
+							filters["$or"] = regexFilters
+						}
+					}
+				} else {
+					filters[key] = bson.M{"$in": strings.Split(value, ",")}
+				}
+				continue
+			}
+
+			if boolFields[key] {
+				boolVal := strings.ToLower(value) == "true"
+				filters[key] = boolVal
+				continue
+			}
+
+			if numericFields[key] {
+				if filters[key] == nil {
+					filters[key] = bson.M{}
+				}
+				if intVal, err := strconv.Atoi(value); err == nil {
+					filters[key].(bson.M)[op] = intVal
+				}
+				continue
+			}
+
+			if dateFields[key] {
+				if filters[key] == nil {
+					filters[key] = bson.M{}
+				}
+				if t, err := time.Parse("2006-01-02", value); err == nil {
+					filters[key].(bson.M)[op] = t
+				}
+				continue
 			}
 		}
 

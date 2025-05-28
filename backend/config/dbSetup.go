@@ -45,7 +45,7 @@ func ConnectDB() (*mongo.Client, error) {
 func InitCollections(client *mongo.Client) {
 	dbName := os.Getenv("DB")
 	UserCollection = client.Database(dbName).Collection("users")
-	PropertyCollection = client.Database(dbName).Collection("demo_prop")
+	PropertyCollection = client.Database(dbName).Collection("properties")
 	FavoriteCollection = client.Database(dbName).Collection("favorites")
 	RecommendationCollection = client.Database(dbName).Collection("recommendations")
 }
