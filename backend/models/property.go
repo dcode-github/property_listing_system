@@ -27,4 +27,5 @@ type Property struct {
 	IsVerified    bool               `bson:"isVerified" json:"isVerified"`
 	ListingType   string             `bson:"listingType" json:"listingType"`
 	CreatedBy     string             `bson:"createdBy" json:"createdBy"`
+	IsFavorite    bool               `bson:"-" json:"isFav"`
 }

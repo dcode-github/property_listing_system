@@ -24,9 +24,9 @@ func Routes(router *mux.Router, client *mongo.Client) {
 	authenticated.HandleFunc("/properties/{id}", controllers.DeleteProperty(client)).Methods("DELETE")
 
 	// Favorites routes
-	// authenticated.HandleFunc("/favorites", controllers.AddFavorite(client)).Methods("POST")
-	// authenticated.HandleFunc("/favorites", controllers.GetFavorites(client)).Methods("GET")
-	// authenticated.HandleFunc("/favorites/{id}", controllers.RemoveFavorite(client)).Methods("DELETE")
+	authenticated.HandleFunc("/favorites", controllers.AddFavorite(client)).Methods("POST")
+	authenticated.HandleFunc("/favorites", controllers.GetFavorites(client)).Methods("GET")
+	authenticated.HandleFunc("/favorites/{propertyID}", controllers.DeleteFavorite(client)).Methods("DELETE")
 
 	// Recommendations routes
 	// authenticated.HandleFunc("/recommend", controllers.RecommendProperty(client)).Methods("POST")

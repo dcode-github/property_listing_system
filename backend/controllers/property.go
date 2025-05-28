@@ -59,15 +59,21 @@ func CreateProperty(_ *mongo.Client) http.HandlerFunc {
 
 func GetAllProperties(_ *mongo.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		userID, ok := r.Context().Value(UserIDKey).(string)
+		if !ok {
+			log.Println("User ID missing in context")
+			http.Error(w, "User ID missing in context", http.StatusUnauthorized)
+			return
+		}
+
 		filters := bson.M{}
 		for key, values := range r.URL.Query() {
-			if len(values) > 0 {
+			if key != "userID" && len(values) > 0 {
 				filters[key] = strings.Join(values, ",")
 			}
 		}
 
-		findOptions := options.Find()
-		findOptions.SetLimit(10)
+		findOptions := options.Find().SetLimit(10)
 
 		cursor, err := config.PropertyCollection.Find(context.TODO(), filters, findOptions)
 		if err != nil {
@@ -77,15 +83,49 @@ func GetAllProperties(_ *mongo.Client) http.HandlerFunc {
 		}
 		defer cursor.Close(context.TODO())
 
-		var results []models.Property
-		if err := cursor.All(context.TODO(), &results); err != nil {
+		var properties []models.Property
+		if err := cursor.All(context.TODO(), &properties); err != nil {
 			log.Printf("Error decoding properties: %v", err)
 			http.Error(w, "Error decoding properties", http.StatusInternalServerError)
 			return
 		}
 
+		propertyIDs := make([]primitive.ObjectID, 0, len(properties))
+		for _, prop := range properties {
+			propertyIDs = append(propertyIDs, prop.ID)
+		}
+
+		favFilter := bson.M{
+			"userID":     userID,
+			"propertyID": bson.M{"$in": propertyIDs},
+		}
+
+		favCursor, err := config.FavoriteCollection.Find(context.TODO(), favFilter)
+		if err != nil {
+			log.Printf("Error fetching favorites: %v", err)
+			http.Error(w, "Error fetching favorites", http.StatusInternalServerError)
+			return
+		}
+		defer favCursor.Close(context.TODO())
+
+		favMap := make(map[primitive.ObjectID]bool)
+		for favCursor.Next(context.TODO()) {
+			var fav models.Favorite
+			if err := favCursor.Decode(&fav); err != nil {
+				log.Printf("Error decoding favorite: %v", err)
+				continue
+			}
+			favMap[fav.PropertyID] = true
+		}
+
+		for i, prop := range properties {
+			if favMap[prop.ID] {
+				properties[i].IsFavorite = true
+			}
+		}
+
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(results)
+		json.NewEncoder(w).Encode(properties)
 	}
 }
 
