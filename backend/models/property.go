@@ -28,4 +28,5 @@ type Property struct {
 	ListingType   string             `bson:"listingType" json:"listingType"`
 	CreatedBy     string             `bson:"createdBy" json:"createdBy"`
 	IsFavorite    bool               `bson:"-" json:"isFav"`
+	RecommendedBy string             `bson:"-" json:"recommendedBy"`
 }

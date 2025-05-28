@@ -132,7 +132,7 @@ func DeleteFavorite(client *mongo.Client) http.HandlerFunc {
 		}
 
 		params := mux.Vars(r)
-		propertyIDHex := params["propertyID"]
+		propertyIDHex := params["id"]
 
 		propertyObjID, err := primitive.ObjectIDFromHex(propertyIDHex)
 		if err != nil {
