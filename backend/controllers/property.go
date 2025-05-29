@@ -4,7 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json" // For generatePropertyDetailCacheKey (if you add it later)
 	"log"
 	"net/http"
 	"net/url"
@@ -27,18 +27,26 @@ type ContextKey string
 
 const UserIDKey = ContextKey("userID")
 
+const (
+	propertyListCachePrefix = "property:list:"
+	defaultCacheTTL         = 10 * time.Minute
+
+	cacheScanPatternProperty = "property:*"
+	cacheScanCount           = 100
+)
+
 func CreateProperty(redisClient *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, ok := r.Context().Value(UserIDKey).(string)
 		if !ok {
-			log.Println("User ID missing in context")
+			log.Println("User ID missing in context for CreateProperty")
 			http.Error(w, "User ID missing in context", http.StatusUnauthorized)
 			return
 		}
 
 		var property models.Property
 		if err := json.NewDecoder(r.Body).Decode(&property); err != nil {
-			log.Printf("Invalid request body: %v", err)
+			log.Printf("Invalid request body for CreateProperty: %v", err)
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
 		}
@@ -53,7 +61,7 @@ func CreateProperty(redisClient *redis.Client) http.HandlerFunc {
 
 		_, err := config.PropertyCollection.InsertOne(r.Context(), property)
 		if err != nil {
-			log.Printf("Insert failed: %v", err)
+			log.Printf("Insert failed for CreateProperty: %v", err)
 			http.Error(w, "Failed to create property", http.StatusInternalServerError)
 			return
 		}
@@ -69,7 +77,9 @@ func CreateProperty(redisClient *redis.Client) http.HandlerFunc {
 
 func GetAllProperties(redisClient *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		userID, ok := r.Context().Value(UserIDKey).(string)
+		requestCtx := r.Context()
+
+		userID, ok := requestCtx.Value(UserIDKey).(string)
 		if !ok {
 			log.Println("User ID missing in context for GetAllProperties")
 			http.Error(w, "User ID missing in context", http.StatusUnauthorized)
@@ -77,20 +87,20 @@ func GetAllProperties(redisClient *redis.Client) http.HandlerFunc {
 		}
 
 		query := r.URL.Query()
-		cacheKey := generateCacheKey(userID, query)
+		cacheKey := generateCacheKeyForPropertyList(userID, query)
 
-		cachedData, err := redisClient.Get(r.Context(), cacheKey).Result()
+		cachedData, err := redisClient.Get(requestCtx, cacheKey).Result()
 		if err == nil {
-			log.Printf("Cache Hit for key: %s", cacheKey)
+			log.Printf("Cache Hit for GetAllProperties key: %s", cacheKey)
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(cachedData))
 			return
 		}
 		if err != redis.Nil {
-			log.Printf("Redis GET error for key %s: %v", cacheKey, err)
+			log.Printf("Redis GET error for GetAllProperties key %s: %v", cacheKey, err)
 		}
 
-		log.Printf("Cache Miss for key: %s", cacheKey)
+		log.Printf("Cache Miss for GetAllProperties key: %s", cacheKey)
 
 		var andConditions []bson.M
 		fieldSpecificConditions := make(map[string]bson.M)
@@ -211,18 +221,19 @@ func GetAllProperties(redisClient *redis.Client) http.HandlerFunc {
 		if len(andConditions) > 0 {
 			finalMongoQuery["$and"] = andConditions
 		}
+
 		findOptions := options.Find().SetLimit(10)
 
-		cursor, err := config.PropertyCollection.Find(r.Context(), finalMongoQuery, findOptions)
+		cursor, err := config.PropertyCollection.Find(requestCtx, finalMongoQuery, findOptions)
 		if err != nil {
 			log.Printf("Error fetching properties with query %+v: %v", finalMongoQuery, err)
 			http.Error(w, "Error fetching properties", http.StatusInternalServerError)
 			return
 		}
-		defer cursor.Close(r.Context())
+		defer cursor.Close(requestCtx)
 
 		var properties []models.Property
-		if err := cursor.All(r.Context(), &properties); err != nil {
+		if err := cursor.All(requestCtx, &properties); err != nil {
 			log.Printf("Error decoding properties: %v", err)
 			http.Error(w, "Error decoding properties", http.StatusInternalServerError)
 			return
@@ -239,22 +250,22 @@ func GetAllProperties(redisClient *redis.Client) http.HandlerFunc {
 				"propertyID": bson.M{"$in": propertyIDs},
 			}
 
-			favCursor, err := config.FavoriteCollection.Find(r.Context(), favFilter)
+			favCursor, err := config.FavoriteCollection.Find(requestCtx, favFilter)
 			if err != nil {
-				log.Printf("Error fetching favorites for user %s: %v", userID, err)
+				log.Printf("Error fetching favorites for user %s in GetAllProperties: %v", userID, err)
 			} else {
-				defer favCursor.Close(r.Context())
+				defer favCursor.Close(requestCtx)
 				favMap := make(map[primitive.ObjectID]bool)
-				for favCursor.Next(r.Context()) {
+				for favCursor.Next(requestCtx) {
 					var fav models.Favorite
 					if err := favCursor.Decode(&fav); err != nil {
-						log.Printf("Error decoding favorite: %v", err)
+						log.Printf("Error decoding favorite in GetAllProperties: %v", err)
 						continue
 					}
 					favMap[fav.PropertyID] = true
 				}
 				if favCursor.Err() != nil {
-					log.Printf("Favorite cursor iteration error: %v", favCursor.Err())
+					log.Printf("Favorite cursor iteration error in GetAllProperties: %v", favCursor.Err())
 				}
 
 				for i := range properties {
@@ -267,14 +278,14 @@ func GetAllProperties(redisClient *redis.Client) http.HandlerFunc {
 
 		resultBytes, err := json.Marshal(properties)
 		if err != nil {
-			log.Printf("Failed to serialize properties: %v", err)
+			log.Printf("Failed to serialize properties for GetAllProperties: %v", err)
 			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 			return
 		}
 
-		err = redisClient.Set(r.Context(), cacheKey, resultBytes, 10*time.Minute).Err()
+		err = redisClient.Set(requestCtx, cacheKey, resultBytes, defaultCacheTTL).Err()
 		if err != nil {
-			log.Printf("Failed to cache response for key %s: %v", cacheKey, err)
+			log.Printf("Failed to cache response for GetAllProperties key %s: %v", cacheKey, err)
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -284,9 +295,11 @@ func GetAllProperties(redisClient *redis.Client) http.HandlerFunc {
 
 func UpdateProperty(redisClient *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		userID, ok := r.Context().Value(UserIDKey).(string)
+		requestCtx := r.Context()
+
+		userID, ok := requestCtx.Value(UserIDKey).(string)
 		if !ok {
-			log.Println("User ID missing in context")
+			log.Println("User ID missing in context for UpdateProperty")
 			http.Error(w, "User ID missing in context", http.StatusUnauthorized)
 			return
 		}
@@ -294,14 +307,14 @@ func UpdateProperty(redisClient *redis.Client) http.HandlerFunc {
 		propertyID := mux.Vars(r)["id"]
 		objID, err := primitive.ObjectIDFromHex(propertyID)
 		if err != nil {
-			log.Printf("Invalid property ID %s: %v", propertyID, err)
+			log.Printf("Invalid property ID '%s' for UpdateProperty: %v", propertyID, err)
 			http.Error(w, "Invalid property ID", http.StatusBadRequest)
 			return
 		}
 
 		var updateData map[string]interface{}
 		if err := json.NewDecoder(r.Body).Decode(&updateData); err != nil {
-			log.Printf("Invalid update data: %v", err)
+			log.Printf("Invalid update data for UpdateProperty: %v", err)
 			http.Error(w, "Invalid update data", http.StatusBadRequest)
 			return
 		}
@@ -316,22 +329,22 @@ func UpdateProperty(redisClient *redis.Client) http.HandlerFunc {
 			if err == nil {
 				updateData["availableFrom"] = t
 			} else {
-				log.Printf("Could not parse 'availableFrom' string '%s' as RFC3339 time: %v", af, err)
+				log.Printf("Could not parse 'availableFrom' string '%s' as RFC3339 time for UpdateProperty: %v", af, err)
 			}
 		}
 
 		filter := bson.M{"_id": objID, "createdBy": userID}
 		update := bson.M{"$set": updateData}
 
-		res, err := config.PropertyCollection.UpdateOne(r.Context(), filter, update)
+		res, err := config.PropertyCollection.UpdateOne(requestCtx, filter, update)
 		if err != nil {
-			log.Printf("Update failed for property %s: %v", propertyID, err)
+			log.Printf("Update failed for property %s in UpdateProperty: %v", propertyID, err)
 			http.Error(w, "Update failed", http.StatusInternalServerError)
 			return
 		}
 
 		if res.MatchedCount == 0 {
-			log.Printf("No property found with ID %s and createdBy %s, or unauthorized to update.", propertyID, userID)
+			log.Printf("No property found with ID %s and createdBy %s for UpdateProperty, or unauthorized.", propertyID, userID)
 			http.Error(w, "No property found or unauthorized", http.StatusForbidden)
 			return
 		}
@@ -347,9 +360,11 @@ func UpdateProperty(redisClient *redis.Client) http.HandlerFunc {
 
 func DeleteProperty(redisClient *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		userID, ok := r.Context().Value(UserIDKey).(string)
+		requestCtx := r.Context()
+
+		userID, ok := requestCtx.Value(UserIDKey).(string)
 		if !ok {
-			log.Println("User ID missing in context")
+			log.Println("User ID missing in context for DeleteProperty")
 			http.Error(w, "User ID missing in context", http.StatusUnauthorized)
 			return
 		}
@@ -357,24 +372,39 @@ func DeleteProperty(redisClient *redis.Client) http.HandlerFunc {
 		propertyID := mux.Vars(r)["id"]
 		objID, err := primitive.ObjectIDFromHex(propertyID)
 		if err != nil {
-			log.Printf("Invalid property ID %s: %v", propertyID, err)
+			log.Printf("Invalid property ID '%s' for DeleteProperty: %v", propertyID, err)
 			http.Error(w, "Invalid property ID", http.StatusBadRequest)
 			return
 		}
 
 		filter := bson.M{"_id": objID, "createdBy": userID}
-
-		res, err := config.PropertyCollection.DeleteOne(r.Context(), filter)
+		propertyDeleteResult, err := config.PropertyCollection.DeleteOne(requestCtx, filter)
 		if err != nil {
-			log.Printf("Delete failed for property %s: %v", propertyID, err)
+			log.Printf("Delete from PropertyCollection failed for property %s in DeleteProperty: %v", propertyID, err)
 			http.Error(w, "Delete failed", http.StatusInternalServerError)
 			return
 		}
 
-		if res.DeletedCount == 0 {
-			log.Printf("No property found with ID %s and createdBy %s, or unauthorized to delete.", propertyID, userID)
-			http.Error(w, "No property found or unauthorized", http.StatusForbidden)
+		if propertyDeleteResult.DeletedCount == 0 {
+			log.Printf("No property found with ID %s and createdBy %s for DeleteProperty, or unauthorized.", propertyID, userID)
+			http.Error(w, "No property found or unauthorized to delete", http.StatusForbidden)
 			return
+		}
+
+		recommendationFilter := bson.M{"propertyID": objID}
+		_, err = config.RecommendationCollection.DeleteMany(requestCtx, recommendationFilter)
+		if err != nil {
+			log.Printf("Warning: Failed to delete recommendations for property %s in DeleteProperty: %v", propertyID, err)
+		} else {
+			log.Printf("Successfully deleted recommendations associated with property %s.", propertyID)
+		}
+
+		favoriteFilter := bson.M{"propertyID": objID}
+		_, err = config.FavoriteCollection.DeleteMany(requestCtx, favoriteFilter)
+		if err != nil {
+			log.Printf("Warning: Failed to delete favorites for property %s in DeleteProperty: %v", propertyID, err)
+		} else {
+			log.Printf("Successfully deleted favorites associated with property %s.", propertyID)
 		}
 
 		go func() {
@@ -382,21 +412,19 @@ func DeleteProperty(redisClient *redis.Client) http.HandlerFunc {
 		}()
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"message": "Property deleted successfully"})
+		json.NewEncoder(w).Encode(map[string]string{"message": "Property and associated data deleted successfully"})
 	}
 }
 
-func generateCacheKey(userID string, queryParams url.Values) string {
+func generateCacheKeyForPropertyList(userID string, queryParams url.Values) string {
 	keys := make([]string, 0, len(queryParams))
 	for k := range queryParams {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-
 	var sb strings.Builder
 	sb.WriteString(userID)
 	sb.WriteString(":")
-
 	for _, key := range keys {
 		values := queryParams[key]
 		sort.Strings(values)
@@ -407,28 +435,26 @@ func generateCacheKey(userID string, queryParams url.Values) string {
 			sb.WriteString("&")
 		}
 	}
-	rawKey := strings.TrimSuffix(sb.String(), "&")
+	rawKeyComponent := strings.TrimSuffix(sb.String(), "&")
 
-	sum := sha256.Sum256([]byte(rawKey))
-	return "property:" + hex.EncodeToString(sum[:])
+	sum := sha256.Sum256([]byte(rawKeyComponent))
+	return propertyListCachePrefix + hex.EncodeToString(sum[:])
 }
 
 func deletePropertyCache(redisClient *redis.Client) {
 	ctx := context.Background()
-	const scanPattern = "property:*"
-	const scanCount = 100
 
 	var keysToDelete []string
 	var cursor uint64
-	var err error
+	var iterErr error
 
-	log.Println("Starting property cache invalidation...")
+	log.Printf("Starting blanket property cache invalidation (pattern: %s)...", cacheScanPatternProperty)
 
 	for {
 		var currentKeys []string
-		currentKeys, cursor, err = redisClient.Scan(ctx, cursor, scanPattern, scanCount).Result()
-		if err != nil {
-			log.Printf("Error during Redis SCAN for pattern '%s': %v", scanPattern, err)
+		currentKeys, cursor, iterErr = redisClient.Scan(ctx, cursor, cacheScanPatternProperty, cacheScanCount).Result()
+		if iterErr != nil {
+			log.Printf("Error during Redis SCAN for pattern '%s': %v", cacheScanPatternProperty, iterErr)
 			return
 		}
 		keysToDelete = append(keysToDelete, currentKeys...)
@@ -438,7 +464,7 @@ func deletePropertyCache(redisClient *redis.Client) {
 	}
 
 	if len(keysToDelete) == 0 {
-		log.Println("No property cache keys found matching pattern to delete.")
+		log.Printf("No property cache keys found matching pattern '%s' to delete.", cacheScanPatternProperty)
 		return
 	}
 
@@ -451,6 +477,6 @@ func deletePropertyCache(redisClient *redis.Client) {
 	if execErr != nil {
 		log.Printf("Error executing pipeline for deleting %d property cache keys: %v", len(keysToDelete), execErr)
 	} else {
-		log.Printf("Property Cache Invalidated. Successfully deleted %d keys matching '%s'.", len(keysToDelete), scanPattern)
+		log.Printf("Property Cache Invalidated. Successfully deleted %d keys matching '%s'.", len(keysToDelete), cacheScanPatternProperty)
 	}
 }

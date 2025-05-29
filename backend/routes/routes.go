@@ -25,11 +25,11 @@ func Routes(router *mux.Router, client *mongo.Client, redisClient *redis.Client)
 	authenticated.HandleFunc("/properties/{id}", controllers.DeleteProperty(redisClient)).Methods("DELETE")
 
 	// Favorites routes
-	authenticated.HandleFunc("/favorites", controllers.AddFavorite()).Methods("POST")
-	authenticated.HandleFunc("/favorites", controllers.GetFavorites()).Methods("GET")
-	authenticated.HandleFunc("/favorites/{id}", controllers.DeleteFavorite()).Methods("DELETE")
+	authenticated.HandleFunc("/favorites", controllers.AddFavorite(redisClient)).Methods("POST")
+	authenticated.HandleFunc("/favorites", controllers.GetFavorites(redisClient)).Methods("GET")
+	authenticated.HandleFunc("/favorites/{id}", controllers.DeleteFavorite(redisClient)).Methods("DELETE")
 
 	// Recommendations routes
-	authenticated.HandleFunc("/recommend", controllers.RecommendProperty()).Methods("POST")
-	authenticated.HandleFunc("/recommendations", controllers.GetRecommendations()).Methods("GET")
+	authenticated.HandleFunc("/recommend", controllers.RecommendProperty(redisClient)).Methods("POST")
+	authenticated.HandleFunc("/recommendations", controllers.GetRecommendations(redisClient)).Methods("GET")
 }
