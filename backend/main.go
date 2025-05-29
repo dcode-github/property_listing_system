@@ -12,6 +12,7 @@ import (
 	"github.com/dcode-github/property_lisitng_system/backend/routes"
 	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
+	"github.com/redis/go-redis/v9"
 	"github.com/rs/cors"
 	"go.mongodb.org/mongo-driver/mongo"
 )
@@ -22,9 +23,9 @@ func loadEnv() {
 	}
 }
 
-func setupRouter(client *mongo.Client) *mux.Router {
+func setupRouter(client *mongo.Client, redisClient *redis.Client) *mux.Router {
 	router := mux.NewRouter()
-	routes.Routes(router, client)
+	routes.Routes(router, client, redisClient)
 	return router
 }
 
@@ -42,9 +43,12 @@ func main() {
 		log.Println("MongoDB connection closed")
 	}()
 
+	redisClient := config.InitRedis()
+	defer redisClient.Close()
+
 	config.InitCollections(client)
 
-	router := setupRouter(client)
+	router := setupRouter(client, redisClient)
 
 	corsOptions := cors.New(cors.Options{
 		AllowedOrigins:   []string{"*"},

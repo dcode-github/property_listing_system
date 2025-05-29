@@ -14,7 +14,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
-func AddFavorite(client *mongo.Client) http.HandlerFunc {
+func AddFavorite() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, ok := r.Context().Value(UserIDKey).(string)
 		if !ok {
@@ -69,7 +69,7 @@ func AddFavorite(client *mongo.Client) http.HandlerFunc {
 	}
 }
 
-func GetFavorites(client *mongo.Client) http.HandlerFunc {
+func GetFavorites() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, ok := r.Context().Value(UserIDKey).(string)
 		if !ok {
@@ -122,7 +122,7 @@ func GetFavorites(client *mongo.Client) http.HandlerFunc {
 	}
 }
 
-func DeleteFavorite(client *mongo.Client) http.HandlerFunc {
+func DeleteFavorite() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, ok := r.Context().Value(UserIDKey).(string)
 		if !ok {

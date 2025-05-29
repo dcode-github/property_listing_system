@@ -11,7 +11,6 @@ import (
 	"github.com/dcode-github/property_lisitng_system/backend/models"
 	"github.com/dcode-github/property_lisitng_system/backend/utils"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
 )
 
 type Response struct {
@@ -23,7 +22,7 @@ type ErrorResponse struct {
 	Message string `json:"message"`
 }
 
-func RegisterUser(client *mongo.Client) http.HandlerFunc {
+func RegisterUser() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var user models.User
 		if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
@@ -67,7 +66,7 @@ func RegisterUser(client *mongo.Client) http.HandlerFunc {
 	}
 }
 
-func LoginUser(client *mongo.Client) http.HandlerFunc {
+func LoginUser() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var credentials models.User
 		if err := json.NewDecoder(r.Body).Decode(&credentials); err != nil {

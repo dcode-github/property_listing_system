@@ -12,7 +12,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
-func RecommendProperty(client *mongo.Client) http.HandlerFunc {
+func RecommendProperty() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		fromUserID, ok := r.Context().Value(UserIDKey).(string)
 		if !ok {
@@ -50,7 +50,7 @@ func RecommendProperty(client *mongo.Client) http.HandlerFunc {
 	}
 }
 
-func GetRecommendations(client *mongo.Client) http.HandlerFunc {
+func GetRecommendations() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		toUserID, ok := r.Context().Value(UserIDKey).(string)
 		if !ok {
