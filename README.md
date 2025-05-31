@@ -98,7 +98,7 @@ Follow these steps to set up the project locally:
 
 ## Contributing
 
-We welcome contributions to EquiTrack! Here's how you can get involved:
+We welcome contributions! Here's how you can get involved:
 
 1. Fork the repository.
 2. Create a new branch: `git checkout -b feature-name`.
